@@ -10,9 +10,12 @@ from pydantic import BaseModel
 
 from backend import (
     run_travel_agent,
+    resume_travel_agent,
     initialize_travel_graph,
     close_travel_graph
 )
+
+from typing import Literal
 
 from contextlib import asynccontextmanager
 
@@ -68,6 +71,10 @@ class TravelRequest(BaseModel):
     message: str
     thread_id: str | None = None
 
+class ApprovalRequest(BaseModel):
+    thread_id: str
+    decision: Literal["approve", "reject"]
+    feedback: str = ""
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -94,22 +101,12 @@ async def travel_planner(request_data: TravelRequest):
             )
 
         result = await run_travel_agent(
-                    user_input=user_message,
-                    thread_id=request_data.thread_id
-                    )
+                user_input=user_message,
+                thread_id=request_data.thread_id
+        )
 
-        return JSONResponse(
-            content={
-                        "success": True,
-                        "thread_id": result["thread_id"],
-                        "answer": result["answer"],
-                        "flight_results": result["flight_results"],
-                        "hotel_results": result["hotel_results"],
-                        "weather_results": result["weather_results"],
-                        "itinerary": result["itinerary"],
-                        "llm_calls": result["llm_calls"],
-                    }
-                )
+        return JSONResponse(content=result)
+            
 
     except Exception as e:
         print("ERROR:", e)
@@ -123,6 +120,31 @@ async def travel_planner(request_data: TravelRequest):
             }
         )
 
+
+@app.post("/api/travel/approval")
+async def travel_approval(request_data: ApprovalRequest):
+
+    try:
+        result = await resume_travel_agent(
+            thread_id=request_data.thread_id,
+            decision=request_data.decision,
+            feedback=request_data.feedback
+        )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+
+        print("APPROVAL ERROR:", e)
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e)
+            }
+        )
 
 
 @app.get("/health")

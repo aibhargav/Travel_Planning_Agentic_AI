@@ -219,6 +219,10 @@ async def initialize_aviation_tools():
         for tool in tools
     }
 
+    for tool in tools:
+        print("\nTool name:", tool.name)
+        print("Description:", tool.description)
+
     if not aviation_tools:
         raise RuntimeError(
             "AviationStack MCP connected but "

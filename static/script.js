@@ -1,6 +1,8 @@
 let currentThreadId = localStorage.getItem("travel_thread_id") || null;
 let latestAnswerMarkdown = "";
 
+let pendingApproval = false;
+
 function setPrompt(text) {
     document.getElementById("userInput").value = text;
 }
@@ -35,12 +37,57 @@ function hideError() {
     errorBox.textContent = "";
 }
 
-function showResult(answer, threadId) {
-    latestAnswerMarkdown = answer;
+function showApproval(data) {
+
+    pendingApproval = true;
+
+    document.getElementById("approveBtn").disabled = false;
+    document.getElementById("rejectBtn").disabled = false;
 
     const resultSection = document.getElementById("resultSection");
     const resultBox = document.getElementById("resultBox");
+    const approvalPanel = document.getElementById("approvalPanel");
     const threadInfo = document.getElementById("threadInfo");
+
+    const itinerary =
+        data.approval?.itinerary || data.itinerary || "";
+
+    latestAnswerMarkdown = itinerary;
+
+    if (typeof marked !== "undefined") {
+        resultBox.innerHTML = marked.parse(itinerary);
+    } else {
+        resultBox.innerText = itinerary;
+    }
+
+    threadInfo.textContent = `Thread ID: ${data.thread_id}`;
+
+    approvalPanel.classList.remove("hidden");
+
+    document.getElementById("approvalFeedback").value = "";
+    document.getElementById("approvalStatus").textContent = "";
+
+    resultSection.classList.remove("hidden");
+
+    resultSection.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+    });
+}
+
+
+function showCompletedResult(data) {
+
+    pendingApproval = false;
+
+    const resultSection = document.getElementById("resultSection");
+    const resultBox = document.getElementById("resultBox");
+    const approvalPanel = document.getElementById("approvalPanel");
+    const threadInfo = document.getElementById("threadInfo");
+
+    const answer = data.answer || "No response generated.";
+
+    latestAnswerMarkdown = answer;
 
     if (typeof marked !== "undefined") {
         resultBox.innerHTML = marked.parse(answer);
@@ -48,7 +95,9 @@ function showResult(answer, threadId) {
         resultBox.innerText = answer;
     }
 
-    threadInfo.textContent = `Thread ID: ${threadId}`;
+    threadInfo.textContent = `Thread ID: ${data.thread_id}`;
+
+    approvalPanel.classList.add("hidden");
 
     resultSection.classList.remove("hidden");
 
@@ -59,6 +108,7 @@ function showResult(answer, threadId) {
 }
 
 async function sendMessage() {
+
     hideError();
 
     const input = document.getElementById("userInput");
@@ -71,34 +121,128 @@ async function sendMessage() {
 
     setLoading(true);
 
+    document.getElementById("approvalPanel").classList.add("hidden");
+
     try {
+
         const response = await fetch("/api/travel", {
+
             method: "POST",
+
             headers: {
                 "Content-Type": "application/json"
             },
+
             body: JSON.stringify({
                 message: message,
                 thread_id: currentThreadId
             })
+
         });
 
         const data = await response.json();
 
-        if (!response.ok || !data.success) {
+        if (!response.ok || data.success === false) {
             throw new Error(data.error || "Something went wrong.");
         }
 
         currentThreadId = data.thread_id;
-        localStorage.setItem("travel_thread_id", currentThreadId);
 
-        showResult(data.answer, data.thread_id);
+        localStorage.setItem(
+            "travel_thread_id",
+            currentThreadId
+        );
+
+        if (data.status === "approval_required") {
+
+            showApproval(data);
+
+        } else if (data.status === "completed") {
+
+            showCompletedResult(data);
+
+        } else {
+
+            throw new Error("Unexpected response from travel API.");
+
+        }
 
     } catch (error) {
+
         showError(error.message);
+
     } finally {
+
         setLoading(false);
+
     }
+}
+
+async function submitApproval(decision) {
+
+    if (!pendingApproval || !currentThreadId) {
+        showError("No pending approval found.");
+        return;
+    }
+
+    const approveBtn = document.getElementById("approveBtn");
+    const rejectBtn = document.getElementById("rejectBtn");
+    const status = document.getElementById("approvalStatus");
+
+    const feedback = document
+        .getElementById("approvalFeedback")
+        .value.trim();
+
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+
+    status.textContent = "Processing your decision...";
+
+    try {
+
+        const response = await fetch("/api/travel/approval", {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+
+                thread_id: currentThreadId,
+
+                decision: decision,
+
+                feedback: feedback
+
+            })
+
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || data.success === false) {
+            throw new Error(data.error || "Approval request failed.");
+        }
+
+        if (data.status !== "completed") {
+            throw new Error("Unexpected approval response.");
+        }
+
+        showCompletedResult(data);
+
+    } catch (error) {
+
+        status.textContent = "";
+
+        showError(error.message);
+
+        approveBtn.disabled = false;
+        rejectBtn.disabled = false;
+
+    }
+
 }
 
 function copyResult() {
